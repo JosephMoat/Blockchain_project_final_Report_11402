@@ -1,0 +1,383 @@
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+
+<div id="hvac-dashboard">
+  <main class="page">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">⛓</div>
+        <div>HVAC Auto Acceptance DApp</div>
+      </div>
+      <div class="network-pill" id="networkStatus">Ethereum Sepolia Testnet</div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-inner">
+       
+        <div>
+          <div class="eyebrow">IoT Oracle × Smart Contract</div>
+          <h1>機電工程自動驗收模擬儀表板</h1>
+          <p class="lead">
+            本介面連接 Sepolia 測試網上的 HVACAcceptance 合約。每日溫濕度資料會透過
+            logData(uint256 _temp, uint256 _humidity) 寫入合約，並由合約自動累計連續成功次數。
+            當連續成功次數達到 30 次，合約即轉為驗收通過。
+          </p>
+ <button class="secondary" onclick="diagnoseContract()">檢查合約</button>
+          <div class="actions">
+          
+            <button id="connectBtn" onclick="connectWallet()">連接 MetaMask</button>
+            <button class="secondary" onclick="copyAddress()">複製合約地址</button>
+            <button class="secondary" onclick="showCurrentContractAddress()">顯示目前合約地址</button>
+            <button class="secondary" onclick="openEtherscan()">查看 Sepolia</button>
+<button class="secondary" id="downloadContractDataBtn" onclick="downloadContractData()">
+  下載資料
+</button>
+            
+          </div>
+        </div>
+
+        <aside class="status-panel">
+          <div class="status-head">
+            <span>工程驗收狀態</span>
+            <span class="wallet" id="walletStatus">Wallet Not Connected</span>
+          </div>
+
+          <div class="state" id="stateText">待啟動</div>
+
+          <div class="progress">
+            <div class="bar" id="progressBar"></div>
+          </div>
+
+          <div class="state-list" id="stateList"></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="panel contract-panel">
+      <div class="section-head">
+        <div>
+          <h2>合約條件輸入區</h2>
+          <p>以下條件由鏈上合約讀取。合約目前不提供前端修改門檻，只能讀取固定值。</p>
+        </div>
+        <div class="contract-badge" id="conditionStatus">尚未同步鏈上條件</div>
+      </div>
+
+      <div class="contract-three-grid">
+        <div class="contract-block">
+          <div class="block-head">
+            <span class="block-icon">01</span>
+            <div>
+              <h3>鏈上數值條件</h3>
+              <p>由合約 TARGET_TEMP、TARGET_HUMIDITY、REQUIRED_COUNT 讀取。</p>
+            </div>
+          </div>
+
+          <div class="contract-input-stack">
+            <div class="contract-input-card">
+              <label>目標溫度</label>
+              <div class="metric-edit">
+                <input id="tempThresholdInput" type="number" value="24" step="1" min="0" readonly>
+                <em>°C</em>
+              </div>
+              <small>合約固定條件：溫度需小於或等於此值</small>
+            </div>
+
+            <div class="contract-input-card">
+              <label>目標濕度</label>
+              <div class="metric-edit">
+                <input id="humidThresholdInput" type="number" value="50" step="1" min="0" max="100" readonly>
+                <em>%</em>
+              </div>
+              <small>合約固定條件：濕度需小於或等於此值</small>
+            </div>
+
+            <div class="contract-input-card">
+              <label>連續成功次數</label>
+              <div class="metric-edit">
+                <input id="requiredDaysInput" type="number" value="30" step="1" min="1" readonly>
+                <em>次</em>
+              </div>
+              <small>達到此次數後，合約轉為驗收通過</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="contract-block">
+          <div class="block-head">
+            <span class="block-icon">02</span>
+            <div>
+              <h3>驗收規則</h3>
+              <p>配合鏈上 HVACAcceptance 合約行為展示。</p>
+            </div>
+          </div>
+
+          <div class="condition-list">
+            <label class="check-row">
+              <input type="checkbox" id="optRequireConsecutive" checked disabled>
+              <span>
+                <strong>需連續達標</strong>
+                <small>合約以 consecutiveSuccesses 累計成功次數</small>
+              </span>
+            </label>
+
+            <label class="check-row">
+              <input type="checkbox" id="optResetOnNormalFail" checked disabled>
+              <span>
+                <strong>未達門檻時歸零</strong>
+                <small>溫濕度任一條件未達標，合約計數會歸零</small>
+              </span>
+            </label>
+
+            <label class="check-row">
+              <input type="checkbox" id="optAutoAccept" checked disabled>
+              <span>
+                <strong>達標後自動驗收</strong>
+                <small>達到 30 次後，isAccepted 轉為 true</small>
+              </span>
+            </label>
+
+            <label class="check-row">
+              <input type="checkbox" id="optAutoReleasePayment" checked disabled>
+              <span>
+                <strong>驗收通過後停止送出</strong>
+                <small>isAccepted 為 true 時，前端停用送出資料按鈕</small>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="contract-block">
+          <div class="block-head">
+            <span class="block-icon">03</span>
+            <div>
+              <h3>重置與事件監聽</h3>
+              <p>透過 resetCounter() 重置測試，並監聽鏈上事件更新 UI。</p>
+            </div>
+          </div>
+
+          <div class="condition-list">
+            <label class="check-row">
+              <input type="checkbox" id="optResetOnAbnormal" checked disabled>
+              <span>
+                <strong>CounterReset 事件</strong>
+                <small>合約重置後，畫面進度與事件紀錄歸零</small>
+              </span>
+            </label>
+
+            <label class="check-row">
+              <input type="checkbox" id="optAbnormalToPending" checked disabled>
+              <span>
+                <strong>DataLogged 事件</strong>
+                <small>每次 logData 後，以 currentCount 更新進度</small>
+              </span>
+            </label>
+
+            <label class="check-row">
+              <input type="checkbox" id="optCriticalFail" checked disabled>
+              <span>
+                <strong>ProjectAccepted 事件</strong>
+                <small>達到 30 次後，畫面顯示驗收通過</small>
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="contract-summary" id="contractSummary"></div>
+    </section>
+
+    <section class="metrics">
+      <div class="metric">
+        <strong id="acceptRate">0%</strong>
+        <span>驗收完成度</span>
+      </div>
+
+      <div class="metric">
+        <strong id="abnormalCount">0</strong>
+        <span>前端註記事件數</span>
+      </div>
+
+      <div class="metric">
+        <strong id="enabledConditions">3</strong>
+        <span>鏈上讀取條件數</span>
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <div class="panel">
+        <h2>Oracle 資料輸入</h2>
+        <p>
+          合約只接受整數溫度與整數濕度。每日溫濕度監測會實際呼叫 logData() 寫入鏈上；
+          其他資料類型僅作為前端事件註記，不會呼叫合約。
+        </p>
+
+        <div class="data-row">
+          <div class="data-box">
+            <strong id="tempShow">23°C</strong>
+            <span>目前溫度</span>
+          </div>
+          <div class="data-box">
+            <strong id="humidShow">45%</strong>
+            <span>目前濕度</span>
+          </div>
+          <div class="data-box">
+            <strong id="daysShow">0 / 30</strong>
+            <span>鏈上連續成功次數</span>
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div>
+            <label>資料類型</label>
+            <select id="dataType" onchange="toggleDataFields()">
+              <optgroup label="鏈上寫入資料">
+                <option value="normal">每日溫濕度監測</option>
+              </optgroup>
+
+              <optgroup label="前端補充紀錄">
+                <option value="retest">復測資料</option>
+                <option value="supervisor_sample">監造抽測資料</option>
+              </optgroup>
+
+              <optgroup label="前端異常註記">
+                <option value="equipment_fault">設備異常／機器損壞</option>
+                <option value="sensor_fault">感測器故障</option>
+                <option value="network_fault">通訊中斷</option>
+                <option value="power_fault">電力異常</option>
+                <option value="environment_over_limit">環境數值超限</option>
+              </optgroup>
+
+              <optgroup label="前端維護與覆核">
+                <option value="maintenance">維護保養紀錄</option>
+                <option value="repair_done">修復完成回報</option>
+                <option value="resume_confirm">復歸確認</option>
+                <option value="manual_review">人工覆核／監造註記</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div>
+            <label>嚴重程度</label>
+            <select id="severity">
+              <option value="info">一般紀錄</option>
+              <option value="warning">警示</option>
+              <option value="critical">重大異常</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-grid" id="normalFields">
+          <div>
+            <label>輸入溫度 °C（整數）</label>
+            <input id="tempInput" type="number" step="1" min="0" value="23" inputmode="numeric" pattern="[0-9]*">
+          </div>
+          <div>
+            <label>輸入濕度 %RH（整數）</label>
+            <input id="humidInput" type="number" step="1" min="0" max="100" value="45" inputmode="numeric" pattern="[0-9]*">
+          </div>
+        </div>
+
+        <div style="margin-top:16px;">
+          <label>事件說明／備註</label>
+          <input
+            id="eventNote"
+            type="text"
+            placeholder="例如：第 1 次監測正常、現場已派工檢修、監造抽測紀錄"
+          >
+        </div>
+
+        <div class="hint" id="dataHint">
+          每日溫濕度監測會實際呼叫 logData() 寫入鏈上；請輸入整數。
+        </div>
+
+        <div class="actions">
+          <button class="green" id="submitBtn" onclick="submitData()">送出鏈上資料</button>
+          <button class="secondary" onclick="randomQualifiedData()">產生合格整數</button>
+          <button class="red" id="resetBtn" onclick="resetCounterOnChain()">重置鏈上計數</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="log-header">
+          <div>
+            <h2>鏈上事件紀錄</h2>
+            <p>
+              監聽 DataLogged、ProjectAccepted、CounterReset。前端註記事件會另外記錄，但不會寫入合約。
+            </p>
+          </div>
+
+          <div class="log-tools">
+            <select id="logFilter" onchange="renderEventLog()">
+              <option value="all">全部事件</option>
+              <option value="oracle">DataLogged</option>
+              <option value="state">ProjectAccepted / 狀態</option>
+              <option value="maintenance">維護覆核</option>
+              <option value="abnormal">異常註記</option>
+              <option value="critical">重大異常</option>
+              <option value="payment">付款事件</option>
+              <option value="info">一般紀錄</option>
+            </select>
+            <button class="secondary small-btn" onclick="clearEventLog()">清除紀錄</button>
+          </div>
+        </div>
+
+        <div class="log-summary">
+          <div>
+            <strong id="logTotal">0</strong>
+            <span>總事件</span>
+          </div>
+          <div>
+            <strong id="logOracle">0</strong>
+            <span>DataLogged</span>
+          </div>
+          <div>
+            <strong id="logAbnormal">0</strong>
+            <span>異常</span>
+          </div>
+          <div>
+            <strong id="logCritical">0</strong>
+            <span>重大</span>
+          </div>
+        </div>
+
+        <div class="event-list" id="eventLog"></div>
+      </div>
+    </section>
+
+    <section class="bottom-grid">
+      <div class="rule-card">
+        <h3>自動驗收邏輯</h3>
+        <p id="ruleText">
+          合約讀取中。連接 MetaMask 後，系統會同步 TARGET_TEMP、TARGET_HUMIDITY、
+          REQUIRED_COUNT、consecutiveSuccesses 與 isAccepted。
+        </p>
+      </div>
+
+      <div class="rule-card">
+        <h3>Sepolia 合約地址</h3>
+        <p>可透過 Sepolia Etherscan 查詢本次部署之智能合約。</p>
+<div class="contract-box" id="contractAddress">
+  0xD9d8B45d0102e4Def881aE652dD205B08AB1D03e
+</div>
+
+<div style="margin-top:14px;">
+  <label>自訂合約地址</label>
+  <input
+    id="contractAddressInput"
+    type="text"
+    placeholder="請輸入 Sepolia 合約地址，例如 0x..."
+    value="0xD9d8B45d0102e4Def881aE652dD205B08AB1D03e"
+  >
+</div>
+        <div class="actions" style="margin-top:12px;">
+  <button class="secondary" onclick="applyCustomContractAddress()">
+    套用合約地址
+  </button>
+</div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      HVACAcceptance｜Sepolia Testnet｜Smart Contract Integrated Dashboard
+    </footer>
+  </main>
+</div>
